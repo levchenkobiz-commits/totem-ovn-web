@@ -1,6 +1,7 @@
 const root = document.querySelector('#root');
 const localHost = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
 const apiBase = localHost ? '/api' : 'https://miniapp.grome.pro/totem-ovn-api';
+const inspectorSessionKey = 'totem-ovn:inspector-session';
 const logo = '<img class="brand" src="./assets/totem-header.svg" alt="Totem">';
 const statusLabels = {
   pass: 'В норме', fail: 'Нарушение', unknown: 'Нет данных', na: 'Не применимо', measured: 'Замер',
@@ -81,7 +82,7 @@ async function api(path, { method = 'GET', body, download = false } = {}) {
   try {
     response = await fetch(apiBase + path, {
       method, headers, body: body === undefined ? undefined : JSON.stringify(body),
-      cache: 'no-store', credentials: 'omit',
+      cache: 'no-store', credentials: 'omit', keepalive: path === '/logout',
     });
   } catch {
     throw new Error('Сервис недоступен. Проверьте соединение и повторите попытку.');
@@ -97,7 +98,22 @@ async function api(path, { method = 'GET', body, download = false } = {}) {
   throw new Error(data.error || 'Запрос не выполнен. Повторите попытку.');
 }
 
+function saveInspectorSession(value) {
+  try {
+    if (value) localStorage.setItem(inspectorSessionKey, value);
+    else localStorage.removeItem(inspectorSessionKey);
+  } catch {
+    // The invitation still works in browsers with storage disabled.
+  }
+}
+
+function savedInspectorSession() {
+  try { return localStorage.getItem(inspectorSessionKey); }
+  catch { return null; }
+}
+
 function clearSession() {
+  if (user?.role === 'inspector' || token === savedInspectorSession()) saveInspectorSession();
   screen++;
   token = user = catalog = draft = undefined;
   reportFilters = {};
@@ -141,17 +157,30 @@ async function signIn(credentials) {
   token = data.token;
   user = data.user;
   catalog = await api('/catalog');
+  if (user.role === 'inspector') saveInspectorSession(token);
   await go('check');
 }
 
-async function openInvitation(invite) {
+async function openInspector(invite, savedToken) {
   const button = root.querySelector('#login button');
   button.disabled = true;
   status('Входим…');
   try {
-    await signIn({ user: 'kseniya', invite });
+    if (invite !== null) {
+      await signIn({ user: 'kseniya', invite });
+      return;
+    }
+    token = savedToken;
+    const restored = await api('/catalog');
+    if (restored.user?.role !== 'inspector') {
+      clearSession();
+      throw new Error('Откройте персональную ссылку Ксении.');
+    }
+    user = restored.user;
+    catalog = restored;
+    await go('check');
   } catch (error) {
-    clearSession();
+    token = user = catalog = undefined;
     loginMessage = error.message;
     renderLogin();
   }
@@ -786,5 +815,6 @@ renderLogin();
 const invite = new URLSearchParams(location.hash.slice(1)).get('invite');
 if (invite !== null) {
   history.replaceState(null, '', location.pathname + location.search);
-  void openInvitation(invite);
 }
+const savedToken = savedInspectorSession();
+if (invite !== null || savedToken) void openInspector(invite, savedToken);
