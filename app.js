@@ -109,9 +109,8 @@ function renderLogin() {
     <img class="login-mark" src="./assets/totem-symbol.svg" alt=""></div>
     <div class="login-body"><form id="login" class="flow">
       <h1>Отдел видеонаблюдения</h1>
-      ${field('Учётная запись', select('user', [
-        { value: 'kseniya', label: 'Ксения' }, { value: 'owner', label: 'Владелец' },
-      ], 'kseniya', 'autocomplete="username"'))}
+      <p class="muted">Ксения входит по персональной ссылке.</p>
+      <h2>Вход владельца</h2>
       ${field('Пароль', input('password', '', 'type="password" required autocomplete="current-password"'))}
       <button class="button">Войти</button>
       ${statusLine}
@@ -125,11 +124,7 @@ function renderLogin() {
     button.disabled = true;
     status('Входим…');
     try {
-      const data = await api('/login', { method: 'POST', body: Object.fromEntries(new FormData(form)) });
-      token = data.token;
-      user = data.user;
-      catalog = await api('/catalog');
-      await go('check');
+      await signIn({ user: 'owner', password: new FormData(form).get('password') });
     } catch (error) {
       if (token) {
         clearSession();
@@ -139,6 +134,27 @@ function renderLogin() {
       button.disabled = false;
     }
   });
+}
+
+async function signIn(credentials) {
+  const data = await api('/login', { method: 'POST', body: credentials });
+  token = data.token;
+  user = data.user;
+  catalog = await api('/catalog');
+  await go('check');
+}
+
+async function openInvitation(invite) {
+  const button = root.querySelector('#login button');
+  button.disabled = true;
+  status('Входим…');
+  try {
+    await signIn({ user: 'kseniya', invite });
+  } catch (error) {
+    clearSession();
+    loginMessage = error.message;
+    renderLogin();
+  }
 }
 
 function shell(page) {
@@ -766,3 +782,9 @@ function renderCo2(main, version) {
 }
 
 renderLogin();
+
+const invite = new URLSearchParams(location.hash.slice(1)).get('invite');
+if (invite !== null) {
+  history.replaceState(null, '', location.pathname + location.search);
+  void openInvitation(invite);
+}
