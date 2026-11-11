@@ -128,9 +128,6 @@ textarea{min-height:92px;resize:vertical}
 .drink-results{grid-column:1/-1;list-style:none;padding:0;margin:6px 0 0}
 .drink-results li{grid-template-columns:minmax(0,1fr) auto auto;font-size:.87rem;padding:6px 0;align-items:center}
 .check-tools{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
-.check-tools>.button{min-height:32px;padding:4px 9px;font-size:.8rem}
-.check-picker{align-items:flex-end;margin-bottom:14px}
-.check-picker .field{flex:1;max-width:680px}
 .wide{grid-column:1/-1}
 .toggle{display:flex;align-items:center;gap:8px;font-size:.85rem;cursor:pointer}
 .toggle input[type=checkbox]{width:18px;min-height:18px}

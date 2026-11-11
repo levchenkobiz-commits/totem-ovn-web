@@ -171,7 +171,7 @@ async function signIn(credentials) {
   user = data.user;
   catalog = await api('/catalog');
   if (user.role === 'inspector') saveInspectorSession(token);
-  await go('check');
+  await go('journal');
 }
 
 async function openInspector(invite, savedToken) {
@@ -191,7 +191,7 @@ async function openInspector(invite, savedToken) {
     }
     user = restored.user;
     catalog = restored;
-    await go('check');
+    await go('journal');
   } catch (error) {
     token = user = catalog = undefined;
     loginMessage = error.message;
@@ -201,14 +201,14 @@ async function openInspector(invite, savedToken) {
 
 function shell(page) {
   const links = [
-    ['check', 'Новая проверка'], ['journal', 'Журнал'], ['employees', 'Сотрудники'], ['schedule', 'График'], ['co2', 'CO₂'],
+    ['journal', 'Проверки'], ['employees', 'Сотрудники'], ['schedule', 'График'], ['co2', 'CO₂'],
     ...(user.role === 'owner' ? [['settings', 'Нормативы']] : []),
   ];
   root.innerHTML = `<header><div class="header-inner">
     <div class="header-top">${logo}<div class="account"><span>${escape(user.name)}</span>
       <button type="button" class="signout" id="signout">Выйти</button></div></div>
     <nav aria-label="Разделы ОВН">${links.map(([id, text]) =>
-      `<button type="button" data-page="${id}"${id === page || (page === 'report' && id === 'journal') ? ' aria-current="page"' : ''}>${text}</button>`,
+      `<button type="button" data-page="${id}"${id === page || (['report', 'check'].includes(page) && id === 'journal') ? ' aria-current="page"' : ''}>${text}</button>`,
     ).join('')}</nav>
     </div></header><main id="content"></main>`;
   root.querySelectorAll('[data-page]').forEach(button => button.onclick = () => go(button.dataset.page));
@@ -241,7 +241,7 @@ function categoryOptions() {
 function blankDraft() {
   return {
     date: currentDate(), location: '', shift: '', subject: '', category: catalog.categories[0]?.id || '',
-    employeeId: '', time: currentTime(), table: '', checkIds: [], observations: {}, notes: '', evidence: [], requestId: crypto.randomUUID(),
+    employeeId: '', time: currentTime(), table: '', checkIds: catalog.categories[0]?.checks.map(check => check.id) || [], observations: {}, notes: '', evidence: [], requestId: crypto.randomUUID(),
   };
 }
 
@@ -291,14 +291,14 @@ function scalarField(spec, value) {
 
 function checklist(category) {
   const checks = (category?.checks || []).filter(check => draft.id && !draft.employeeId || draft.checkIds?.includes(check.id));
-  if (!checks.length) return '<p class="empty">Добавьте пункт, который проверяете на записи.</p>';
+  if (!checks.length) return '<p class="empty">Для этой категории пока не настроен чек-лист.</p>';
   return checks.map(check => {
     const entry = draft.observations[check.id] || {};
     const observed = entry.state === 'observed';
     return `<section class="check" data-check="${escape(check.id)}">
       <div class="check-heading"><div><h3 class="check-title" id="label-${escape(check.id)}">${escape(check.label)}</h3>
       ${check.hint ? `<p class="hint">${escape(check.hint)}</p>` : ''}</div>
-      <div class="check-tools">${draft.id && !draft.employeeId ? '' : `<button type="button" class="button quiet" data-remove-check="${escape(check.id)}" aria-label="Убрать пункт ${escape(check.label)}">Убрать</button>`}<div class="states" role="radiogroup" aria-labelledby="label-${escape(check.id)}">
+      <div class="check-tools"><div class="states" role="radiogroup" aria-labelledby="label-${escape(check.id)}">
       ${Object.entries(modes).map(([value, label]) =>
         `<label><input type="radio" name="state-${escape(check.id)}" value="${value}"${value === (entry.state || 'unknown') ? ' checked' : ''}><span>${label}</span></label>`,
       ).join('')}</div></div></div>
@@ -397,9 +397,6 @@ function renderCheck(main) {
     ${!employees.some(item => item.active) && !editedId ? '<div class="empty">Сначала добавьте реальных сотрудников. <button type="button" class="button secondary" id="add-first-employee">Перейти к сотрудникам</button></div>' : ''}
     <section aria-labelledby="checklist-title">
       <div class="section-head"><h2 id="checklist-title">${escape(category?.label || 'Пункты проверки')}</h2></div>
-      ${draft.id && !draft.employeeId ? '' : `<div class="check-picker actions">
-      ${field('Пункт проверки', select('checkId', [{value:'',label:'Выберите пункт'}, ...(category?.checks || []).filter(item => !draft.checkIds.includes(item.id)).map(item => ({value:item.id,label:item.label}))], ''))}
-      <button type="button" class="button secondary" id="add-check">Добавить пункт</button></div>`}
       <div class="panel checklist">${checklist(category)}</div>
     </section>
     <section class="panel flow">
@@ -408,30 +405,12 @@ function renderCheck(main) {
     </section>
     <datalist id="drink-names">${options((formCatalog.settings?.drinkLimits || []).map(({ name }) => ({ value: name, label: name })))}</datalist>
     <div class="actions"><button type="submit" class="button">Сохранить проверку</button>
-      ${editedId ? '<button type="button" class="button quiet" id="cancel-edit">Отменить правки</button>' : ''}
+      ${editedId ? '<button type="button" class="button quiet" id="cancel-edit">Отменить правки</button>' : '<button type="button" class="button quiet" id="cancel-check">Отмена</button>'}
     </div>${statusLine}
     </form>`;
   const form = main.querySelector('form');
   applyRepeats(form, { evidence: evidenceRow });
   main.querySelector('#add-first-employee')?.addEventListener('click', () => go('employees'));
-  main.querySelector('#add-check')?.addEventListener('click', () => {
-    const id = form.elements.checkId.value;
-    if (!id) return form.elements.checkId.focus();
-    readDraft(form, category);
-    draft.checkIds.push(id);
-    draft.observations[id] = { state: 'observed', values: {} };
-    renderCheck(main);
-    main.querySelector(`[data-check="${CSS.escape(id)}"] input, [data-check="${CSS.escape(id)}"] select`)?.focus();
-  });
-  form.addEventListener('click', event => {
-    const button = event.target.closest('[data-remove-check]');
-    if (!button) return;
-    readDraft(form, category);
-    draft.checkIds = draft.checkIds.filter(id => id !== button.dataset.removeCheck);
-    delete draft.observations[button.dataset.removeCheck];
-    renderCheck(main);
-    main.querySelector('#add-check')?.focus();
-  });
   if (!(draft.id && !draft.employeeId)) void syncCheckEmployees(form);
 
   form.addEventListener('save-draft', () => { if (draft?.id === editedId && draft) readDraft(form, category); });
@@ -441,7 +420,7 @@ function renderCheck(main) {
       readDraft(form, category);
       draft.category = target.value;
       draft.observations = {};
-      draft.checkIds = [];
+      draft.checkIds = formCatalog.categories.find(item => item.id === draft.category)?.checks.map(check => check.id) || [];
       renderCheck(main);
       main.querySelector('[name=category]').focus();
     }
@@ -453,6 +432,10 @@ function renderCheck(main) {
       const fields = target.closest('[data-check]').querySelector('fieldset');
       fields.hidden = fields.disabled = target.value !== 'observed';
     }
+  });
+  main.querySelector('#cancel-check')?.addEventListener('click', () => {
+    draft = undefined;
+    go('journal');
   });
   main.querySelector('#cancel-edit')?.addEventListener('click', () => {
     draft = undefined;
@@ -470,7 +453,7 @@ function renderCheck(main) {
     } else {
       payload.workflowVersion = 2;
       if (!payload.location || !payload.employeeId || !payload.time) return status('Укажите точку, сотрудника и время проверки.', 'error');
-      if (!payload.checkIds.length) return status('Добавьте хотя бы один пункт проверки.', 'error');
+      if (!payload.checkIds.length) return status('В выбранной категории нет пунктов проверки.', 'error');
       if (payload.category === 'table' && !payload.table) return status('Укажите стол.', 'error');
     }
     delete payload.employee;
@@ -556,7 +539,7 @@ function journalQuery() {
 
 async function renderJournal(main, version) {
   try { const rows = await loadEmployees(); if (version !== screen) return; employees = rows; } catch (error) { if (version !== screen) return; }
-  main.innerHTML = `${pageHead('Журнал проверок')}
+  main.innerHTML = `${pageHead('Проверки', '', '<button type="button" class="button" id="create-check">Создать проверку</button>')}
     <div class="flow">
       <form class="panel flow" id="filters">
         <div class="grid filters">
@@ -577,6 +560,10 @@ async function renderJournal(main, version) {
       <section class="panel" id="summary" aria-label="Сводка" aria-busy="true"><p class="muted">Загружаем сводку…</p></section>
       <section class="panel" id="records" aria-label="Проверки" aria-busy="true"><p class="muted">Загружаем проверки…</p></section>
     </div>`;
+  main.querySelector('#create-check').onclick = () => {
+    if (draft?.id) draft = undefined;
+    go('check');
+  };
   let filterRevision = 0;
   const form = main.querySelector('form');
   const summary = main.querySelector('#summary');
